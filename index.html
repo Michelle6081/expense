@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="記帳">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#0a84ff">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<title>費用記錄</title>
+<style>
+:root{--bg:#f2f2f7;--card:#fff;--text:#111;--sub:#8a8a8e;--line:#e5e5ea;--accent:#0a84ff;--danger:#ff3b30}
+@media(prefers-color-scheme:dark){:root{--bg:#000;--card:#1c1c1e;--text:#f2f2f7;--sub:#98989d;--line:#38383a}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;font:16px/1.4 -apple-system,"PingFang TC",sans-serif;background:var(--bg);color:var(--text);
+ padding:env(safe-area-inset-top) 0 calc(70px + env(safe-area-inset-bottom))}
+main{max-width:600px;margin:0 auto;padding:16px}
+h1{font-size:28px;margin:8px 0 16px}
+.card{background:var(--card);border-radius:14px;padding:14px;margin-bottom:14px}
+label{display:block;font-size:13px;color:var(--sub);margin:10px 0 4px}
+label:first-child{margin-top:0}
+input,textarea{width:100%;font:inherit;color:var(--text);background:var(--bg);border:0;border-radius:10px;padding:12px;appearance:none;-webkit-appearance:none;min-height:46px}
+.cats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.cats button{border:0;border-radius:10px;padding:12px 0;font:inherit;background:var(--bg);color:var(--text)}
+.cats button.on{background:var(--accent);color:#fff}
+.btn{display:block;width:100%;border:0;border-radius:12px;padding:14px;font:600 17px inherit;background:var(--accent);color:#fff;margin-top:14px}
+.btn.sec{background:var(--bg);color:var(--accent)}
+.btn.del{background:var(--bg);color:var(--danger)}
+.row{display:flex;gap:10px;align-items:center;padding:11px 0;border-top:1px solid var(--line)}
+.row:first-child{border-top:0}
+.row .d{font-size:12px;color:var(--sub);min-width:46px}
+.row .m{flex:1;min-width:0}
+.row .n{font-size:13px;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .a{font-variant-numeric:tabular-nums;font-weight:600}
+.sec-h{display:flex;justify-content:space-between;font-weight:700;margin-bottom:4px}
+.sec-h small{color:var(--sub);font-weight:400}
+.total{display:flex;justify-content:space-between;font-size:20px;font-weight:700}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.empty{color:var(--sub);text-align:center;padding:20px 0}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;border:0;background:none;font:inherit;font-size:13px;color:var(--sub);padding:10px 0}
+nav button.on{color:var(--accent);font-weight:600}
+nav button b{display:block;font-size:20px;font-weight:400}
+.hide{display:none}
+.tag{font-size:12px;border-radius:6px;padding:1px 6px;background:var(--bg);color:var(--sub);margin-right:4px}
+</style>
+</head>
+<body>
+<main>
+<!-- 記帳 -->
+<section id="p-add">
+  <h1 id="addTitle">記一筆</h1>
+  <div class="card">
+    <label>日期</label><input type="date" id="fDate">
+    <label>類別</label><div class="cats" id="fCats"></div>
+    <label>金額</label><input type="number" id="fAmt" inputmode="decimal" placeholder="0">
+    <label>備註</label><textarea id="fNote" rows="2" placeholder="選填"></textarea>
+    <button class="btn" id="saveBtn">儲存</button>
+    <button class="btn sec hide" id="cancelBtn">取消編輯</button>
+    <button class="btn del hide" id="delBtn">刪除這筆</button>
+  </div>
+  <h1 style="font-size:20px">最近記錄</h1>
+  <div class="card" id="recent"></div>
+</section>
+
+<!-- 報表 -->
+<section id="p-rep" class="hide">
+  <h1>費用統計</h1>
+  <div class="card">
+    <div class="two">
+      <div><label>起</label><input type="date" id="rFrom"></div>
+      <div><label>迄</label><input type="date" id="rTo"></div>
+    </div>
+    <div class="two" style="margin-top:10px">
+      <button class="btn sec" style="margin:0" id="thisMonth">本月</button>
+      <button class="btn sec" style="margin:0" id="lastMonth">上月</button>
+    </div>
+  </div>
+  <div class="card"><div class="total"><span>合計</span><span id="rTotal">0</span></div></div>
+  <div id="rBody"></div>
+  <button class="btn" id="csvBtn">匯出 CSV（可開 Excel）</button>
+</section>
+
+<!-- 設定 -->
+<section id="p-set" class="hide">
+  <h1>備份</h1>
+  <div class="card">
+    <p style="margin-top:0;color:var(--sub);font-size:14px">資料只存在這支手機裡。換手機或清除 Safari 資料前，請先備份。</p>
+    <button class="btn" id="bkBtn">匯出備份檔</button>
+    <button class="btn sec" id="rsBtn">從備份檔還原</button>
+    <input type="file" id="rsFile" accept=".json,application/json" class="hide">
+  </div>
+</section>
+</main>
+
+<nav>
+  <button data-p="add" class="on"><b>＋</b>記帳</button>
+  <button data-p="rep"><b>☰</b>統計</button>
+  <button data-p="set"><b>⚙︎</b>備份</button>
+</nav>
+
+<script>
+const CATS=['停車','充電','餐費','其他'];
+const KEY='expenses.v1';
+let items=[];
+try{items=JSON.parse(localStorage.getItem(KEY)||'[]')}catch(e){items=[]}
+const save=()=>localStorage.setItem(KEY,JSON.stringify(items));
+const $=id=>document.getElementById(id);
+const pad=n=>String(n).padStart(2,'0');
+const ymd=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=n=>Number(n).toLocaleString('zh-TW',{maximumFractionDigits:2});
+
+let cat=CATS[0], editId=null;
+
+// ---- 分頁 ----
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>show(b.dataset.p));
+function show(p){
+  ['add','rep','set'].forEach(k=>{$('p-'+k).classList.toggle('hide',k!==p)});
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));
+  if(p==='rep')renderReport();
+  window.scrollTo(0,0);
+}
+
+// ---- 記帳 ----
+function renderCats(){
+  $('fCats').innerHTML=CATS.map(c=>`<button type="button" class="${c===cat?'on':''}" data-c="${c}">${c}</button>`).join('');
+  $('fCats').querySelectorAll('button').forEach(b=>b.onclick=()=>{cat=b.dataset.c;renderCats()});
+}
+function resetForm(){
+  editId=null;cat=CATS[0];
+  $('fDate').value=ymd(new Date());$('fAmt').value='';$('fNote').value='';
+  $('addTitle').textContent='記一筆';$('saveBtn').textContent='儲存';
+  $('cancelBtn').classList.add('hide');$('delBtn').classList.add('hide');
+  renderCats();
+}
+$('saveBtn').onclick=()=>{
+  const amt=parseFloat($('fAmt').value);
+  if(!$('fDate').value)return alert('請選擇日期');
+  if(!(amt>=0)||isNaN(amt))return alert('請輸入金額');
+  const rec={date:$('fDate').value,cat,amount:amt,note:$('fNote').value.trim()};
+  if(editId){const i=items.findIndex(x=>x.id===editId);if(i>=0)items[i]={...items[i],...rec}}
+  else items.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),...rec});
+  save();resetForm();renderRecent();
+};
+$('cancelBtn').onclick=resetForm;
+$('delBtn').onclick=()=>{
+  if(!editId||!confirm('確定刪除這筆記錄？'))return;
+  items=items.filter(x=>x.id!==editId);save();resetForm();renderRecent();
+};
+function edit(id){
+  const r=items.find(x=>x.id===id);if(!r)return;
+  editId=id;cat=r.cat;
+  $('fDate').value=r.date;$('fAmt').value=r.amount;$('fNote').value=r.note||'';
+  $('addTitle').textContent='編輯記錄';$('saveBtn').textContent='更新';
+  $('cancelBtn').classList.remove('hide');$('delBtn').classList.remove('hide');
+  renderCats();show('add');
+}
+function rowHtml(r,showCat){
+  return `<div class="row" data-id="${r.id}"><div class="d">${r.date.slice(5)}</div>
+  <div class="m"><div>${showCat?`<span class="tag">${esc(r.cat)}</span>`:''}${r.note?'':'<span style="color:var(--sub)">—</span>'}</div>${r.note?`<div class="n" style="${showCat?'':'color:var(--text);font-size:15px'}">${esc(r.note)}</div>`:''}</div>
+  <div class="a">${fmt(r.amount)}</div></div>`;
+}
+function bindRows(el){el.querySelectorAll('.row').forEach(r=>r.onclick=()=>edit(r.dataset.id))}
+function renderRecent(){
+  const l=[...items].sort((a,b)=>b.date.localeCompare(a.date)||b.id.localeCompare(a.id)).slice(0,15);
+  $('recent').innerHTML=l.length?l.map(r=>rowHtml(r,true)).join(''):'<div class="empty">還沒有記錄</div>';
+  bindRows($('recent'));
+}
+
+// ---- 統計 ----
+function setRange(from,to){$('rFrom').value=ymd(from);$('rTo').value=ymd(to);renderReport()}
+$('thisMonth').onclick=()=>{const n=new Date();setRange(new Date(n.getFullYear(),n.getMonth(),1),new Date(n.getFullYear(),n.getMonth()+1,0))};
+$('lastMonth').onclick=()=>{const n=new Date();setRange(new Date(n.getFullYear(),n.getMonth()-1,1),new Date(n.getFullYear(),n.getMonth(),0))};
+$('rFrom').onchange=$('rTo').onchange=renderReport;
+function inRange(){
+  const f=$('rFrom').value,t=$('rTo').value;
+  return items.filter(r=>(!f||r.date>=f)&&(!t||r.date<=t)).sort((a,b)=>a.date.localeCompare(b.date));
+}
+function renderReport(){
+  const l=inRange();
+  $('rTotal').textContent=fmt(l.reduce((s,r)=>s+r.amount,0));
+  let h='';
+  CATS.forEach(c=>{
+    const g=l.filter(r=>r.cat===c);if(!g.length)return;
+    h+=`<div class="card"><div class="sec-h"><span>${c} <small>${g.length} 筆</small></span><span>${fmt(g.reduce((s,r)=>s+r.amount,0))}</span></div>${g.map(r=>rowHtml(r,false)).join('')}</div>`;
+  });
+  $('rBody').innerHTML=h||'<div class="card empty">此期間沒有記錄</div>';
+  bindRows($('rBody'));
+}
+
+// ---- 匯出 / 備份 ----
+async function shareFile(name,text,type){
+  const file=new File([text],name,{type});
+  if(navigator.canShare&&navigator.canShare({files:[file]})){
+    try{await navigator.share({files:[file],title:name});return}catch(e){if(e.name==='AbortError')return}
+  }
+  const a=document.createElement('a');a.href=URL.createObjectURL(file);a.download=name;
+  document.body.appendChild(a);a.click();a.remove();
+}
+$('csvBtn').onclick=()=>{
+  const l=inRange();if(!l.length)return alert('此期間沒有記錄');
+  const q=s=>`"${String(s).replace(/"/g,'""')}"`;
+  const rows=[['日期','類別','金額','備註'].join(',')];
+  CATS.forEach(c=>l.filter(r=>r.cat===c).forEach(r=>rows.push([r.date,q(r.cat),r.amount,q(r.note||'')].join(','))));
+  rows.push(['','合計',l.reduce((s,r)=>s+r.amount,0),''].join(','));
+  shareFile(`費用_${$('rFrom').value}_${$('rTo').value}.csv`,'﻿'+rows.join('\n'),'text/csv');
+};
+$('bkBtn').onclick=()=>shareFile(`費用備份_${ymd(new Date())}.json`,JSON.stringify(items),'application/json');
+$('rsBtn').onclick=()=>$('rsFile').click();
+$('rsFile').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  try{
+    const d=JSON.parse(await f.text());
+    if(!Array.isArray(d))throw 0;
+    if(!confirm(`備份檔有 ${d.length} 筆。要與現有資料合併嗎？`))return;
+    const have=new Set(items.map(x=>x.id));
+    d.forEach(r=>{if(r&&r.id&&r.date&&!have.has(r.id))items.push({id:r.id,date:r.date,cat:CATS.includes(r.cat)?r.cat:'其他',amount:+r.amount||0,note:r.note||''})});
+    save();renderRecent();alert('還原完成');
+  }catch(_){alert('檔案格式不正確')}
+  e.target.value='';
+};
+
+// ---- 初始化 ----
+resetForm();renderRecent();
+(()=>{const n=new Date();$('rFrom').value=ymd(new Date(n.getFullYear(),n.getMonth(),1));$('rTo').value=ymd(new Date(n.getFullYear(),n.getMonth()+1,0))})();
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{});
+</script>
+</body>
+</html>
