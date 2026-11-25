@@ -1,6 +1,6 @@
 {
-  "name": "費用記錄",
-  "short_name": "記帳",
+  "name": "業務記帳",
+  "short_name": "業務記帳",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

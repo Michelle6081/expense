@@ -5,12 +5,12 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="記帳">
+<meta name="apple-mobile-web-app-title" content="業務記帳">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="theme-color" content="#0a84ff">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-180.png">
-<title>費用記錄</title>
+<title>業務記帳</title>
 <style>
 :root{--bg:#f2f2f7;--card:#fff;--text:#111;--sub:#8a8a8e;--line:#e5e5ea;--accent:#0a84ff;--danger:#ff3b30}
 @media(prefers-color-scheme:dark){:root{--bg:#000;--card:#1c1c1e;--text:#f2f2f7;--sub:#98989d;--line:#38383a}}
@@ -50,7 +50,6 @@ nav button b{display:block;font-size:20px;font-weight:400}
 </head>
 <body>
 <main>
-<!-- 記帳 -->
 <section id="p-add">
   <h1 id="addTitle">記一筆</h1>
   <div class="card">
@@ -66,7 +65,6 @@ nav button b{display:block;font-size:20px;font-weight:400}
   <div class="card" id="recent"></div>
 </section>
 
-<!-- 報表 -->
 <section id="p-rep" class="hide">
   <h1>費用統計</h1>
   <div class="card">
@@ -81,10 +79,9 @@ nav button b{display:block;font-size:20px;font-weight:400}
   </div>
   <div class="card"><div class="total"><span>合計</span><span id="rTotal">0</span></div></div>
   <div id="rBody"></div>
-  <button class="btn" id="csvBtn">匯出 CSV（可開 Excel）</button>
+  <button class="btn" id="xlsBtn">匯出 Excel 報表</button>
 </section>
 
-<!-- 設定 -->
 <section id="p-set" class="hide">
   <h1>備份</h1>
   <div class="card">
@@ -103,11 +100,15 @@ nav button b{display:block;font-size:20px;font-weight:400}
 </nav>
 
 <script>
-const CATS=['停車','充電','餐費','其他'];
+const CATS=['停車','充電','交際費','其他'];
 const KEY='expenses.v1';
 let items=[];
 try{items=JSON.parse(localStorage.getItem(KEY)||'[]')}catch(e){items=[]}
+// 舊資料「餐費」改為「交際費」
+let migrated=false;
+items.forEach(r=>{if(r.cat==='餐費'){r.cat='交際費';migrated=true}});
 const save=()=>localStorage.setItem(KEY,JSON.stringify(items));
+if(migrated)save();
 const $=id=>document.getElementById(id);
 const pad=n=>String(n).padStart(2,'0');
 const ymd=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
@@ -116,7 +117,6 @@ const fmt=n=>Number(n).toLocaleString('zh-TW',{maximumFractionDigits:2});
 
 let cat=CATS[0], editId=null;
 
-// ---- 分頁 ----
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>show(b.dataset.p));
 function show(p){
   ['add','rep','set'].forEach(k=>{$('p-'+k).classList.toggle('hide',k!==p)});
@@ -125,7 +125,6 @@ function show(p){
   window.scrollTo(0,0);
 }
 
-// ---- 記帳 ----
 function renderCats(){
   $('fCats').innerHTML=CATS.map(c=>`<button type="button" class="${c===cat?'on':''}" data-c="${c}">${c}</button>`).join('');
   $('fCats').querySelectorAll('button').forEach(b=>b.onclick=()=>{cat=b.dataset.c;renderCats()});
@@ -171,7 +170,6 @@ function renderRecent(){
   bindRows($('recent'));
 }
 
-// ---- 統計 ----
 function setRange(from,to){$('rFrom').value=ymd(from);$('rTo').value=ymd(to);renderReport()}
 $('thisMonth').onclick=()=>{const n=new Date();setRange(new Date(n.getFullYear(),n.getMonth(),1),new Date(n.getFullYear(),n.getMonth()+1,0))};
 $('lastMonth').onclick=()=>{const n=new Date();setRange(new Date(n.getFullYear(),n.getMonth()-1,1),new Date(n.getFullYear(),n.getMonth(),0))};
@@ -192,24 +190,97 @@ function renderReport(){
   bindRows($('rBody'));
 }
 
-// ---- 匯出 / 備份 ----
-async function shareFile(name,text,type){
-  const file=new File([text],name,{type});
+// ---- 檔案分享/下載 ----
+async function shareFile(name,data,type){
+  const file=new File([data],name,{type});
   if(navigator.canShare&&navigator.canShare({files:[file]})){
     try{await navigator.share({files:[file],title:name});return}catch(e){if(e.name==='AbortError')return}
   }
   const a=document.createElement('a');a.href=URL.createObjectURL(file);a.download=name;
   document.body.appendChild(a);a.click();a.remove();
 }
-$('csvBtn').onclick=()=>{
+
+// ---- 簡易 xlsx 產生器（不需外部套件，可離線）----
+const enc=new TextEncoder();
+const CRC=(()=>{const t=[];for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}return t})();
+function crc32(u){let c=0xFFFFFFFF;for(let i=0;i<u.length;i++)c=CRC[(c^u[i])&255]^(c>>>8);return (c^0xFFFFFFFF)>>>0}
+function zip(files){
+  const parts=[],cen=[];let off=0;
+  const d=new Date(),dt=((d.getFullYear()-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate(),tm=(d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()>>1);
+  files.forEach(f=>{
+    const nm=enc.encode(f.name),data=enc.encode(f.data),crc=crc32(data);
+    const lh=new DataView(new ArrayBuffer(30));
+    lh.setUint32(0,0x04034b50,true);lh.setUint16(4,20,true);lh.setUint16(6,0x0800,true);lh.setUint16(8,0,true);
+    lh.setUint16(10,tm,true);lh.setUint16(12,dt,true);lh.setUint32(14,crc,true);lh.setUint32(18,data.length,true);lh.setUint32(22,data.length,true);
+    lh.setUint16(26,nm.length,true);lh.setUint16(28,0,true);
+    parts.push(new Uint8Array(lh.buffer),nm,data);
+    const ch=new DataView(new ArrayBuffer(46));
+    ch.setUint32(0,0x02014b50,true);ch.setUint16(4,20,true);ch.setUint16(6,20,true);ch.setUint16(8,0x0800,true);ch.setUint16(10,0,true);
+    ch.setUint16(12,tm,true);ch.setUint16(14,dt,true);ch.setUint32(16,crc,true);ch.setUint32(20,data.length,true);ch.setUint32(24,data.length,true);
+    ch.setUint16(28,nm.length,true);ch.setUint32(42,off,true);
+    cen.push(new Uint8Array(ch.buffer),nm);
+    off+=30+nm.length+data.length;
+  });
+  const cenLen=cen.reduce((s,u)=>s+u.length,0);
+  const e=new DataView(new ArrayBuffer(22));
+  e.setUint32(0,0x06054b50,true);e.setUint16(8,files.length,true);e.setUint16(10,files.length,true);e.setUint32(12,cenLen,true);e.setUint32(16,off,true);
+  return new Blob([...parts,...cen,new Uint8Array(e.buffer)]);
+}
+const xe=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const colL=i=>String.fromCharCode(65+i);
+// rows: 二維陣列；儲存格可為 值 或 {v,b:粗體}
+function sheetXml(rows,widths){
+  let x='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+  x+='<cols>'+widths.map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join('')+'</cols><sheetData>';
+  rows.forEach((r,ri)=>{
+    x+=`<row r="${ri+1}">`;
+    r.forEach((c,ci)=>{
+      if(c===null||c===undefined||c==='')return;
+      const o=(typeof c==='object')?c:{v:c};
+      const ref=colL(ci)+(ri+1),s=o.b?' s="1"':(typeof o.v==='number'?' s="2"':'');
+      x+=typeof o.v==='number'?`<c r="${ref}"${s}><v>${o.v}</v></c>`:`<c r="${ref}"${s} t="inlineStr"><is><t xml:space="preserve">${xe(o.v)}</t></is></c>`;
+    });
+    x+='</row>';
+  });
+  return x+'</sheetData></worksheet>';
+}
+function buildXlsx(sheets){
+  const files=[
+    {name:'[Content_Types].xml',data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'+sheets.map((_,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')+'</Types>'},
+    {name:'_rels/.rels',data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'},
+    {name:'xl/workbook.xml',data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'+sheets.map((s,i)=>`<sheet name="${xe(s.name)}" sheetId="${i+1}" r:id="rId${i+1}"/>`).join('')+'</sheets></workbook>'},
+    {name:'xl/_rels/workbook.xml.rels',data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+sheets.map((_,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join('')+`<Relationship Id="rId${sheets.length+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`},
+    {name:'xl/styles.xml',data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="#,##0.##"/></numFmts><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs></styleSheet>'},
+    ...sheets.map((s,i)=>({name:`xl/worksheets/sheet${i+1}.xml`,data:sheetXml(s.rows,s.widths)}))
+  ];
+  return zip(files);
+}
+$('xlsBtn').onclick=()=>{
   const l=inRange();if(!l.length)return alert('此期間沒有記錄');
-  const q=s=>`"${String(s).replace(/"/g,'""')}"`;
-  const rows=[['日期','類別','金額','備註'].join(',')];
-  CATS.forEach(c=>l.filter(r=>r.cat===c).forEach(r=>rows.push([r.date,q(r.cat),r.amount,q(r.note||'')].join(','))));
-  rows.push(['','合計',l.reduce((s,r)=>s+r.amount,0),''].join(','));
-  shareFile(`費用_${$('rFrom').value}_${$('rTo').value}.csv`,'﻿'+rows.join('\n'),'text/csv');
+  const f=$('rFrom').value,t=$('rTo').value,sum=a=>a.reduce((s,r)=>s+r.amount,0);
+  const B=v=>({v,b:true});
+  const sheets=[];
+  // 彙總
+  const s1=[[B('業務費用報表')],[`期間：${f||'最早'} ～ ${t||'最新'}`],[],[B('類別'),B('筆數'),B('金額')]];
+  CATS.forEach(c=>{const g=l.filter(r=>r.cat===c);s1.push([c,g.length,sum(g)])});
+  s1.push([B('合計'),B(l.length),B(sum(l))]);
+  sheets.push({name:'彙總',rows:s1,widths:[16,10,16]});
+  // 全部明細（依類別排序）
+  const s2=[[B('日期'),B('類別'),B('金額'),B('備註')]];
+  CATS.forEach(c=>l.filter(r=>r.cat===c).forEach(r=>s2.push([r.date,r.cat,r.amount,r.note||''])));
+  s2.push([B('合計'),'',B(sum(l)),'']);
+  sheets.push({name:'全部明細',rows:s2,widths:[14,12,14,40]});
+  // 各類別一張
+  CATS.forEach(c=>{
+    const g=l.filter(r=>r.cat===c);if(!g.length)return;
+    const rows=[[B('日期'),B('金額'),B('備註')],...g.map(r=>[r.date,r.amount,r.note||'']),[B('小計'),B(sum(g)),'']];
+    sheets.push({name:c,rows,widths:[14,14,40]});
+  });
+  shareFile(`業務費用_${f}_${t}.xlsx`,buildXlsx(sheets),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 };
-$('bkBtn').onclick=()=>shareFile(`費用備份_${ymd(new Date())}.json`,JSON.stringify(items),'application/json');
+
+// ---- 備份 ----
+$('bkBtn').onclick=()=>shareFile(`業務記帳備份_${ymd(new Date())}.json`,JSON.stringify(items),'application/json');
 $('rsBtn').onclick=()=>$('rsFile').click();
 $('rsFile').onchange=async e=>{
   const f=e.target.files[0];if(!f)return;
@@ -218,13 +289,12 @@ $('rsFile').onchange=async e=>{
     if(!Array.isArray(d))throw 0;
     if(!confirm(`備份檔有 ${d.length} 筆。要與現有資料合併嗎？`))return;
     const have=new Set(items.map(x=>x.id));
-    d.forEach(r=>{if(r&&r.id&&r.date&&!have.has(r.id))items.push({id:r.id,date:r.date,cat:CATS.includes(r.cat)?r.cat:'其他',amount:+r.amount||0,note:r.note||''})});
+    d.forEach(r=>{if(r&&r.id&&r.date&&!have.has(r.id)){const c=r.cat==='餐費'?'交際費':r.cat;items.push({id:r.id,date:r.date,cat:CATS.includes(c)?c:'其他',amount:+r.amount||0,note:r.note||''})}});
     save();renderRecent();alert('還原完成');
   }catch(_){alert('檔案格式不正確')}
   e.target.value='';
 };
 
-// ---- 初始化 ----
 resetForm();renderRecent();
 (()=>{const n=new Date();$('rFrom').value=ymd(new Date(n.getFullYear(),n.getMonth(),1));$('rTo').value=ymd(new Date(n.getFullYear(),n.getMonth()+1,0))})();
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
